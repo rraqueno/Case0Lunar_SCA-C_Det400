@@ -21,7 +21,6 @@ pro write_ghost_weights_radiances_as_matrix_high_resolution, input_image_filenam
 
   n_values = n_elements( histogram_data )
 
-stop
 
 
 ;
