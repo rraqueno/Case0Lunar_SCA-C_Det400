@@ -30,7 +30,7 @@ sca3_detector_hist = histogram(data.field05[sca3_indices])
 ;
 ; Put all three histograms into an array
 ;
-sca_detector_hist = transpose([[sca1_detector_hist[0:500]],[sca2_detector_hist[0:500]],[sca3_detector_hist[0:500]]])
+sca_detector_hist = transpose([[sca1_detector_hist],[sca2_detector_hist],[sca3_detector_hist]])
 
 ;
 ; Number of SCAs and number of detectors per SCA
@@ -227,6 +227,8 @@ n_goes_positions = n_elements( sorted_indices[0,*] )
 biases = fltarr( n_goes_positions )
 
 openw,2,'L8_bias_goes_resolution.txt'
+goes_lats = !NULL
+goes_lons = !NULL
 for i=0, n_goes_positions-1 do begin
   l8_positions = where( sorted_indices[0,i] eq fix( ground_track_samples ) $
 	and sorted_indices[1,i] eq fix( ground_track_lines), n_l8_positions )
@@ -235,11 +237,13 @@ for i=0, n_goes_positions-1 do begin
 
   printf,2, l8_lats[ index ], l8_lons[ index ], l8_bias[index], i
 
-endfor
+  goes_lats = [goes_lats, l8_lats[index]]
+  goes_lons = [goes_lons, l8_lons[index]]
 
+endfor
 close,2
 ;
-; Figure out the angle to rotate the ghost map based on the 
+; Figure out the angle to rotate the image based on the 
 ; first and last entries of the satellite path
 ;
 delta_points = float(sorted_indices[*,-1]-sorted_indices[*,0])
@@ -307,13 +311,13 @@ for i=0,n-1 do begin
     y=-entry[i].y_degrees
     sample = tan(x*!DTOR)*281.14+103
     line = tan(y*!DTOR)*281.14+103
-    radiance_array[sample,line,0]=entry[i].level
+    radiance_array[sample,line,3]=entry[i].level
+if ~finite(radiance_array[sample,line,0]) then radiance_array[sample,line,0]=0.0
+    radiance_array[sample,line,0]=radiance_array[sample,line,0]+1
 if ~finite(radiance_array[sample,line,1]) then radiance_array[sample,line,1]=0.0
-    radiance_array[sample,line,1]=radiance_array[sample,line,1]+1
+    radiance_array[sample,line,1]=radiance_array[sample,line,1]+entry[i].level
 if ~finite(radiance_array[sample,line,2]) then radiance_array[sample,line,2]=0.0
-    radiance_array[sample,line,2]=radiance_array[sample,line,2]+entry[i].level
-if ~finite(radiance_array[sample,line,3]) then radiance_array[sample,line,3]=0.0
-    radiance_array[sample,line,3]=radiance_array[sample,line,3]+entry[i].level^2 
+    radiance_array[sample,line,2]=radiance_array[sample,line,2]+entry[i].level^2 
     
 endfor
 
@@ -321,24 +325,25 @@ endfor
 ; 1. Rotate the original ghost map and
 ; 2. put it back to into the original radiance_array
 ;
-ghost_radiance_array[*,*,0] = rot(radiance_array[*,*,0], rotate_ghost_angle )
-radiance_array[*,*,0] = ghost_radiance_array[*,*,0]
+;ghost_radiance_array[*,*,0] = rot(radiance_array[*,*,0], rotate_ghost_angle )
+;radiance_array[*,*,0] = ghost_radiance_array[*,*,0]
 
-ghost_radiance_array[*,*,1] = rot(radiance_array[*,*,1], rotate_ghost_angle )
-radiance_array[*,*,1] = ghost_radiance_array[*,*,1]
+;ghost_radiance_array[*,*,1] = rot(radiance_array[*,*,1], rotate_ghost_angle )
+;radiance_array[*,*,1] = ghost_radiance_array[*,*,1]
 
-ghost_radiance_array[*,*,2] = rot(radiance_array[*,*,2], rotate_ghost_angle )
-radiance_array[*,*,2] = ghost_radiance_array[*,*,2]
+;ghost_radiance_array[*,*,2] = rot(radiance_array[*,*,2], rotate_ghost_angle )
+;radiance_array[*,*,2] = ghost_radiance_array[*,*,2]
 
-ghost_radiance_array[*,*,3] = rot(radiance_array[*,*,3], rotate_ghost_angle )
-radiance_array[*,*,3] = ghost_radiance_array[*,*,3]
+;ghost_radiance_array[*,*,3] = rot(radiance_array[*,*,3], rotate_ghost_angle )
+;radiance_array[*,*,3] = ghost_radiance_array[*,*,3]
 
 ;
 ; Figure out where all the values greater than zero exits in the weights band.
 ; We will use this to index the subsection of the GOES image as the ghost map
 ; is moved across the scene
 ;
-gt_zeroes = where(ghost_radiance_array[*,*,0] gt 0.0 )
+;gt_zeroes = where(ghost_radiance_array[*,*,3] gt 0.0 )
+gt_zeroes = where(radiance_array[*,*,3] gt 0.0 )
 
 ;
 ; Pull out the GOES subsection for the ground track locations
@@ -352,12 +357,17 @@ for band = 0,n_positions-1 do begin
  
       goes_subsection = image[ground_track_sample-102:ground_track_sample+102, ground_track_line-102:ground_track_line+102]
 
+      rotated_goes_subsection = rot(goes_subsection, -rotate_ghost_angle) 
 
-      radiance_array[*,*,band+4] = goes_subsection
 
+      radiance_array[*,*,band+4] = rotated_goes_subsection
+
+;
+; Fill temp variable with all NaNs
+;
       temp = ghost_radiance_array[*,*,band+4] 
 
-      temp[gt_zeroes] = goes_subsection[gt_zeroes]
+      temp[gt_zeroes] = rotated_goes_subsection[gt_zeroes]
 
       ghost_radiance_array[*,*,band+4] = temp
 
@@ -377,16 +387,21 @@ wset,1
         tvscl,/ord,image_array[*,*,band]
         xyouts,10,10,ghost_map_filename+' SCA:'+strtrim(string(sca+1),2)+' '+'Detector:'+strtrim(string(detector+1),2) + " "+ "Entries="+strtrim( string(n),2)+" "+"POS="+strtrim(band,2),/device
 	wait,0.125
-	band_names[band]='File:'+ghost_map_filename+'; SCA:'+strtrim(string(sca+1),2)+'; '+'Detector:'+strtrim(string(detector+1),2)+"; "+"Entries="+ strtrim(string(n),2)+"; BoresightLat="+strtrim(string(ground_track_lat),2)+"; BoresightLon="+strtrim(string(ground_track_lon),2)+"; BoresightLine="+strtrim(string(ground_track_line),2)+"; BoresightSample="+strtrim(string(ground_track_sample),2)
+
+	band_names[band]='File:'+ghost_map_filename+'; SCA:'+strtrim(string(sca+1),2)+'; '+'Detector:'+strtrim(string(detector+1),2)+"; "+"Entries="+ strtrim(string(n),2)+"; BoresightLat="+strtrim(string(goes_lats[band]),2)+"; BoresightLon="+strtrim(string(goes_lons[band]),2)+"; BoresightLine="+strtrim(string(ground_track_line),2)+"; BoresightSample="+strtrim(string(ground_track_sample),2)
+
 wset,0
+
         tvscl,/ord,image_array_display[*,*,band]
         xyouts,10,10,ghost_map_filename+' SCA:'+strtrim(string(sca+1),2)+' '+'Detector:'+strtrim(string(detector+1),2) + " "+ strtrim(string(n),2)+" entries",/device
 	
 endfor
 
-  envi_write_envi_file, radiance_array,out_name=output_file_basename+'-unsampled'+'.img',bnames=["Ghost Weights","Vector Hits","Sum Weights","Sum^2 Weights",band_names], map_info=map_info
+  envi_write_envi_file, radiance_array,out_name=output_file_basename+'-unsampled'+'.img',bnames=["Vector Hits","Sum Weights","Sum^2 Weights","Ghost Weights",band_names], map_info=map_info
 
-  envi_write_envi_file, ghost_radiance_array,out_name=output_file_basename+'-'+'sampled'+'.img',bnames=["Ghost Weights","Vector Hits","Sum Weights","Sum^2 Weights",band_names], map_info=map_info
+  envi_write_envi_file, ghost_radiance_array,out_name=output_file_basename+'-'+'sampled'+'.img',bnames=["Vector Hits","Sum Weights","Sum^2 Weights","Ghost Weights",band_names], map_info=map_info
+
+
 
 ;
 ; The following files represent the radiances corresponding to the tracks
